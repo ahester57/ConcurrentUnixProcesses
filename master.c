@@ -66,29 +66,44 @@ int main (int argc, char** argv) {
 	skey = ftok(KEYPATH, SEM_ID); 
 
 	/*************** Set up semaphore *************/
+	// semaphore contains 3 sems:
+	// 0 = file i/o lock
+	// 1 = master knows when done
+	// 2 = for limiting to 19 children at one time
 	int semid;
-	if ((semid = semget(skey, 2, PERM | IPC_CREAT)) == -1) {
+	if ((semid = semget(skey, 3, PERM | IPC_CREAT)) == -1) {
 		perror("Failed to create semaphore.");
 		return 1;
 	}	
 	struct sembuf wait[1];
 	struct sembuf waitfordone[1];
 	struct sembuf signal[1];
+	struct sembuf birthcontrol[1];
 	setsembuf(wait, 0, -1, 0);
 	setsembuf(waitfordone, 1, 0, 0);
 	setsembuf(signal, 0, 1, 0);
+	setsembuf(birthcontrol, 2, -1, 0);
+	// set up file i/o lock
 	if (initelement(semid, 0, 1) == -1) {
 		perror("Failed to initialize semaphore.");
-		// remove sem
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			perror("Failed to remove semaphore.");
 		return 1;
 	}
-
-	if (initelement(semid, 1, 19) == -1) {
+	// set up master knowing when done
+	if (initelement(semid, 1, lines) == -1) {
 		perror("Failed to initialize semaphore.");
-		// remove sem
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			perror("Failed to remove semaphore.");
 		return 1;
 	}
-
+	// set up child limiter
+	if (initelement(semid, 2, 19) == -1) {
+		perror("Failed to initialize semaphore.");
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			perror("Failed to remove semaphore.");
+		return 1;
+	}
 
 	/************** Set up message queue *********/
 	// Initiate message queue	
@@ -118,10 +133,17 @@ int main (int argc, char** argv) {
 	// make child
 	int childpid;
 	char palinid[3];
+	char palinindex[3];
 	int i = 0;
-	while (i < 19) {
+	while (i < lines) {
+
+		if (semop(semid, birthcontrol, 1) == -1) {
+			perror("Semaphore birth control.");
+			return 1;
+		}
 		if (childpid = fork()) {
-			sprintf(palinid, "%d", i+1);
+			sprintf(palinid, "%d", i+1 % 20);
+			sprintf(palinindex, "%d", i);
 			break;
 		}
 		i++;
@@ -132,20 +154,23 @@ int main (int argc, char** argv) {
 		perror("Failed to create child.");
 
 	if (childpid > 0) {
-		execl("./palin", "palin", palinid, palinid, NULL);
+		// execute palin with id
+		execl("./palin", "palin", palinid, palinindex, NULL);
 		perror("Exec failure.");
 		exit(1); // if error
 	}
 	/***************** Parent *****************/
 	if (childpid == 0) {
 		
+		// Waits for all children to be done
 		semop(semid, waitfordone, 1);
-
+		// Kill message queue
 		fprintf(stderr, "Killing msgqueue.\n");	
 		if (removeMsgQueue(msgid) == -1){
 			perror("Failed to destroy message queue.");
 			return 1;
 		}
+		// kill semaphore set
 		fprintf(stderr, "Killing semaphore set.\n");
 		if (semctl(semid, 0, IPC_RMID) == -1) {
 			perror("Failed to remove semaphore set.");

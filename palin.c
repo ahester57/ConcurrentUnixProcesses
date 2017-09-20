@@ -65,16 +65,18 @@ int main (int argc, char** argv) {
 	
 	/***************** Set up semaphore ************/
 	int semid;
-	if ((semid = semget(skey, 2, PERM)) == -1) {
+	if ((semid = semget(skey, 3, PERM)) == -1) {
 		perror("Failed to set up semaphore.");
 		return 1;
 	}
 	struct sembuf wait[1];
 	struct sembuf signal[1];
 	struct sembuf signalDad[1];
+	struct sembuf imdone[1];
 	setsembuf(wait, 0, -1, 0);
 	setsembuf(signal, 0, 1, 0);
 	setsembuf(signalDad, 1, -1, 0);
+	setsembuf(imdone, 2, 1, 0);
 	
 	/**************** Set up message queue *********/
 	int msgid;
@@ -88,13 +90,16 @@ int main (int argc, char** argv) {
 		perror("Failed to recieve message.");
 		return 1;
 	}
-	
+	/************ Entry section ***************/	
 	semop(semid, wait, 1);
+	/************ Critical section ***********/
 	sleep(r1);
 	fprintf(stderr, "%ld\t%d\t%s\n", (long)getpid(), index, mymsg.mText);
 	sleep(r2);
-	semop(semid, signal, 1);
-	semop(semid, signalDad, 1);
+	/*********** Exit section **************/
+	semop(semid, signal, 1); // unlock file
+	semop(semid, signalDad, 1); // decrement line counter
+	semop(semid, imdone, 1);	// tell dad im off to college
 	if (errno != 0)
 		perror("palin:");
 	return 0;

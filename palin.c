@@ -1,8 +1,11 @@
 /*
-$Id: palin.c,v 1.3 2017/09/17 22:50:15 o1-hester Exp o1-hester $
-$Date: 2017/09/17 22:50:15 $ 
-$Revision: 1.3 $
+$Id: palin.c,v 1.4 2017/09/20 01:59:32 o1-hester Exp o1-hester $
+$Date: 2017/09/20 01:59:32 $ 
+$Revision: 1.4 $
 $Log: palin.c,v $
+Revision 1.4  2017/09/20 01:59:32  o1-hester
+semaphonres set up
+
 Revision 1.3  2017/09/17 22:50:15  o1-hester
 shm to msgqueue
 
@@ -28,6 +31,7 @@ $Author: o1-hester $
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#define KEYPATH "./yobanana.boy"
 #define PROJ_ID 456234
 #define SEM_ID 234456
 #define PERM (S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH)
@@ -38,10 +42,10 @@ typedef struct {
 } mymsg_t;
 
 int palindrome(const char* string);
+void setsembuf(struct sembuf *s, int n, int op, int flg);
 
 int main (int argc, char** argv) {
-	const char* keypath = "./yobanana.boy";
-	char* st;
+	// check for # of args
 	if (argc < 3) {
 		fprintf(stderr, "Wrong # of args. ");
 		exit(1);
@@ -55,14 +59,28 @@ int main (int argc, char** argv) {
 	int id = atoi(argv[1]);
 	int index = atoi(argv[2]);
 	// get key for shmem
-	key_t key;
-	key = ftok(keypath, PROJ_ID);		
+	key_t mkey, skey;
+	mkey = ftok(KEYPATH, PROJ_ID);		
+	skey = ftok(KEYPATH, SEM_ID);
 	
-	//sleep(r1);
+	/***************** Set up semaphore ************/
+	int semid;
+	if ((semid = semget(skey, 2, PERM)) == -1) {
+		perror("Failed to set up semaphore.");
+		return 1;
+	}
+	struct sembuf wait[1];
+	struct sembuf signal[1];
+	struct sembuf signalDad[1];
+	setsembuf(wait, 0, -1, 0);
+	setsembuf(signal, 0, 1, 0);
+	setsembuf(signalDad, 1, -1, 0);
+	
+	/**************** Set up message queue *********/
 	int msgid;
 	int size;
 	mymsg_t mymsg;	
-	if ((msgid = msgget(key, PERM)) == -1) {
+	if ((msgid = msgget(mkey, PERM)) == -1) {
 		perror("Failed to create message queue.");
 		return 1;
 	}
@@ -70,9 +88,13 @@ int main (int argc, char** argv) {
 		perror("Failed to recieve message.");
 		return 1;
 	}
-
+	
+	semop(semid, wait, 1);
+	sleep(r1);
 	fprintf(stderr, "%ld\t%d\t%s\n", (long)getpid(), index, mymsg.mText);
 	sleep(r2);
+	semop(semid, signal, 1);
+	semop(semid, signalDad, 1);
 	if (errno != 0)
 		perror("palin:");
 	return 0;
@@ -80,4 +102,13 @@ int main (int argc, char** argv) {
 
 int palindrome(const char* string) {
 
+}
+
+
+//set up a semaphore operation
+void setsembuf(struct sembuf *s, int n, int op, int flg) {
+	s->sem_num = (short)n;
+	s->sem_op = (short)op;
+	s->sem_flg = (short)flg;
+	return;
 }

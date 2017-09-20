@@ -1,8 +1,11 @@
 /*
-$Id: master.c,v 1.3 2017/09/17 22:50:33 o1-hester Exp o1-hester $
-$Date: 2017/09/17 22:50:33 $
-$Revision: 1.3 $
+$Id: master.c,v 1.4 2017/09/20 01:59:20 o1-hester Exp o1-hester $
+$Date: 2017/09/20 01:59:20 $
+$Revision: 1.4 $
 $Log: master.c,v $
+Revision 1.4  2017/09/20 01:59:20  o1-hester
+*** empty log message ***
+
 Revision 1.3  2017/09/17 22:50:33  o1-hester
 shm to msgqueue
 
@@ -27,6 +30,7 @@ $Author: o1-hester $
 #include <sys/shm.h>
 #include <sys/msg.h>
 #include <sys/stat.h>
+#define KEYPATH "./yobanana.boy"
 #define PROJ_ID 456234
 #define SEM_ID 234456
 #define PERM (S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH)
@@ -38,11 +42,12 @@ typedef struct {
 
 void setArrayFromFile(char** list, FILE* fp);
 int countLines(FILE* fp);
-int detachAndRemove(int msgid);
+int removeMsgQueue(int msgid);
+void setsembuf(struct sembuf *s, int n, int op, int flg);
+int initelement(int semid, int semnum, int semval);
 
 int main (int argc, char** argv) {
 	const char* filename = "./strings.in";
-	const char* keypath = "./yobanana.boy";
 	char** mylist;
 
 	FILE* fp = fopen(filename, "r");
@@ -56,17 +61,44 @@ int main (int argc, char** argv) {
 	setArrayFromFile(mylist, fp);
 
 	// get key from file
-	key_t key;
-	key = ftok(keypath, PROJ_ID);
-	
+	key_t mkey, skey;
+	mkey = ftok(KEYPATH, PROJ_ID);
+	skey = ftok(KEYPATH, SEM_ID); 
+
+	/*************** Set up semaphore *************/
+	int semid;
+	if ((semid = semget(skey, 2, PERM | IPC_CREAT)) == -1) {
+		perror("Failed to create semaphore.");
+		return 1;
+	}	
+	struct sembuf wait[1];
+	struct sembuf waitfordone[1];
+	struct sembuf signal[1];
+	setsembuf(wait, 0, -1, 0);
+	setsembuf(waitfordone, 1, 0, 0);
+	setsembuf(signal, 0, 1, 0);
+	if (initelement(semid, 0, 1) == -1) {
+		perror("Failed to initialize semaphore.");
+		// remove sem
+		return 1;
+	}
+
+	if (initelement(semid, 1, 9) == -1) {
+		perror("Failed to initialize semaphore.");
+		// remove sem
+		return 1;
+	}
+
+
+	/************** Set up message queue *********/
 	// Initiate message queue	
 	int msgid;
 	mymsg_t* mymsg;
-	if ((msgid = msgget(key, PERM | IPC_CREAT)) == -1) {
+	if ((msgid = msgget(mkey, PERM | IPC_CREAT)) == -1) {
 		perror("Failed to create message queue.");
 		exit(1);
 	}
-
+	
 	// Send mylist to msgqueue
 	int j;
 	for (j = 1; j <= lines; j++) {
@@ -86,12 +118,13 @@ int main (int argc, char** argv) {
 	// make child
 	int childpid;
 	char palinid[3];
-	for (j = 1; j < 19; j++) {
+	for (j = 1; j < 20; j++) {
 		if (childpid = fork()) {
 			sprintf(palinid, "%d", j);	
 			break;
 		}
 	}
+	/***************** Child ******************/
 	if (childpid == -1)
 		perror("Failed to create child.");
 
@@ -100,20 +133,13 @@ int main (int argc, char** argv) {
 		perror("Exec failure.");
 		exit(1); // if error
 	}
+	/***************** Parent *****************/
 	if (childpid == 0) {
-		int v;
-		// destroy shmem segment
-
-		while (v = waitpid(-1, NULL, WNOHANG)) {
-			if (errno == ECHILD) {
-				perror("waiting:");
-				break;
-			}
-		};
-
+		
+		semop(semid, waitfordone, 1);
 
 		fprintf(stderr, "Killing msgqueue.");	
-		if (detachAndRemove(msgid) == -1){
+		if (removeMsgQueue(msgid) == -1){
 			perror("Failed to destroy message queue.");
 			exit(1);
 		}
@@ -151,8 +177,27 @@ int countLines(FILE* fp) {
 	return n;
 }
 
-// destroy shared memory segment
-int detachAndRemove(int msgid) {
+// returns -1 on failure
+int initelement(int semid, int semnum, int semval) {
+	union semun {
+		int val;
+		struct semid_ds *buf;
+		unsigned short *array;
+	} arg;
+	arg.val = semval;
+	return semctl(semid, semnum, SETVAL, arg);
+}
+	
+//set up a semaphore operation
+void setsembuf(struct sembuf *s, int n, int op, int flg) {
+	s->sem_num = (short)n;
+	s->sem_op = (short)op;
+	s->sem_flg = (short)flg;
+	return;
+}
+
+// destroy message queue segment
+int removeMsgQueue(int msgid) {
 	return msgctl(msgid, IPC_RMID, NULL);
 }
 

@@ -83,7 +83,7 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 
-	if (initelement(semid, 1, 9) == -1) {
+	if (initelement(semid, 1, 19) == -1) {
 		perror("Failed to initialize semaphore.");
 		// remove sem
 		return 1;
@@ -118,12 +118,15 @@ int main (int argc, char** argv) {
 	// make child
 	int childpid;
 	char palinid[3];
-	for (j = 1; j < 20; j++) {
+	int i = 0;
+	while (i < 19) {
 		if (childpid = fork()) {
-			sprintf(palinid, "%d", j);	
+			sprintf(palinid, "%d", i+1);
 			break;
 		}
+		i++;
 	}
+
 	/***************** Child ******************/
 	if (childpid == -1)
 		perror("Failed to create child.");
@@ -138,11 +141,17 @@ int main (int argc, char** argv) {
 		
 		semop(semid, waitfordone, 1);
 
-		fprintf(stderr, "Killing msgqueue.");	
+		fprintf(stderr, "Killing msgqueue.\n");	
 		if (removeMsgQueue(msgid) == -1){
 			perror("Failed to destroy message queue.");
-			exit(1);
+			return 1;
 		}
+		fprintf(stderr, "Killing semaphore set.\n");
+		if (semctl(semid, 0, IPC_RMID) == -1) {
+			perror("Failed to remove semaphore set.");
+			return 1;
+		}
+		fprintf(stderr, "Done.\n");
 	}	
 	return 0;	
 

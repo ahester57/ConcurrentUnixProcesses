@@ -2,3 +2,5 @@
 *.o
 master
 palin
+*.out
+mmm.c

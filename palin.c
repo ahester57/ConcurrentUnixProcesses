@@ -1,8 +1,14 @@
 /*
-$Id: palin.c,v 1.4 2017/09/20 01:59:32 o1-hester Exp o1-hester $
-$Date: 2017/09/20 01:59:32 $ 
-$Revision: 1.4 $
+$Id: palin.c,v 1.6 2017/09/22 22:56:10 o1-hester Exp $
+$Date: 2017/09/22 22:56:10 $ 
+$Revision: 1.6 $
 $Log: palin.c,v $
+Revision 1.6  2017/09/22 22:56:10  o1-hester
+palindrome support
+
+Revision 1.5  2017/09/20 06:50:22  o1-hester
+child limit
+
 Revision 1.4  2017/09/20 01:59:32  o1-hester
 semaphonres set up
 
@@ -18,47 +24,31 @@ Initial revision
 $Author: o1-hester $
 */
 
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
 #include <time.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <sys/sem.h>
-#include <sys/shm.h>
-#include <sys/stat.h>
-#define KEYPATH "./yobanana.boy"
-#define PROJ_ID 456234
-#define SEM_ID 234456
-#define PERM (S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH)
+#include "ipchelper.h"
+#define PALIN "./palin.out"
+#define NOPALIN "./nopalin.out"
 
-typedef struct {
-	long mType;
-	char mText[80];
-} mymsg_t;
-
+int writeToFile(const char* filename, long pid, int index, const char* text); 
 int palindrome(const char* string);
-void setsembuf(struct sembuf *s, int n, int op, int flg);
+char* trimstring(const char* string);
 
 int main (int argc, char** argv) {
 	// check for # of args
 	if (argc < 3) {
 		fprintf(stderr, "Wrong # of args. ");
-		exit(1);
+		return 1;
 	}
 	// random r1 r2
 	int r1, r2;
 	srand(time(NULL));
 	r1 = rand() % 3;
 	r2 = rand() % 3;
-
+	
+	// if not number, then id, index = 0, respectively
 	int id = atoi(argv[1]);
 	int index = atoi(argv[2]);
-	// get key for shmem
+	// get keys
 	key_t mkey, skey;
 	mkey = ftok(KEYPATH, PROJ_ID);		
 	skey = ftok(KEYPATH, SEM_ID);
@@ -69,51 +59,116 @@ int main (int argc, char** argv) {
 		perror("Failed to set up semaphore.");
 		return 1;
 	}
-	struct sembuf wait[1];
-	struct sembuf signal[1];
-	struct sembuf signalDad[1];
-	struct sembuf imdone[1];
-	setsembuf(wait, 0, -1, 0);
-	setsembuf(signal, 0, 1, 0);
+	struct sembuf mutex[2];
+	struct sembuf signalDad[2];
+	setsembuf(mutex, 0, -1, 0);
+	setsembuf(mutex+1, 0, 1, 0);
 	setsembuf(signalDad, 1, -1, 0);
-	setsembuf(imdone, 2, 1, 0);
+	setsembuf(signalDad+1, 2, 1, 0);
 	
 	/**************** Set up message queue *********/
 	int msgid;
-	int size;
+	size_t size;
 	mymsg_t mymsg;	
 	if ((msgid = msgget(mkey, PERM)) == -1) {
 		perror("Failed to create message queue.");
 		return 1;
 	}
-	if ((size = msgrcv(msgid, &mymsg, 80, index+1, 0)) == -1) {
+	// receive message into mymsg.mText
+	if ((size = msgrcv(msgid, &mymsg, LINESIZE, index+1, 0)) == -1) {
 		perror("Failed to recieve message.");
 		return 1;
 	}
+
 	/************ Entry section ***************/	
-	semop(semid, wait, 1);
+	// wait until your turn
+	if (semop(semid, mutex, 1) == -1){
+		perror("Failed to lock semid.");
+		return 1;	
+	}
 	/************ Critical section ***********/
-	sleep(r1);
-	fprintf(stderr, "%ld\t%d\t%s\n", (long)getpid(), index, mymsg.mText);
-	sleep(r2);
+	//sleep(r1);
+		
+	long pid = (long)getpid();	
+	const time_t tm = time(NULL);
+	char* tme = ctime(&tm);
+	fprintf(stderr, "palin (%ld) in crit section: %s", pid, tme); 
+
+	int p = palindrome(mymsg.mText);
+	char* filename;
+
+	if (p < 0) { filename = NOPALIN; }
+	else { filename = PALIN; }
+
+	if (writeToFile(filename, pid, index, mymsg.mText) == -1) {
+		// failed to open file
+		return 1;
+	}	
+
+	//sleep(r2);
 	/*********** Exit section **************/
-	semop(semid, signal, 1); // unlock file
-	semop(semid, signalDad, 1); // decrement line counter
-	semop(semid, imdone, 1);	// tell dad im off to college
-	if (errno != 0)
+	// unlock file
+	if (semop(semid, mutex+1, 1) == -1) { 		
+		perror("Failed to unlock semid.");
+		return 1;
+	}
+	// decrement line counter
+	if (semop(semid, signalDad, 2) == -1) {
+		perror("Failed to signal parent.");
+		return 1;
+	}
+ 	if (errno != 0) {
 		perror("palin:");
+		return 1;
+	}
 	return 0;
 }
 
+// writes to file, returns -1 on error, 0 otherwise
+int writeToFile(const char* filename, long pid, int index, const char* text) {
+	FILE* fp;
+	fp = fopen(filename, "a+");
+	if (fp == NULL) {
+		perror("Failed to open file:");
+		return -1;
+	}
+	fprintf((FILE*)fp, "%ld\t%d\t%s\n", pid, index, text);
+	fclose(fp);
+	return 0;
+}
+
+// returns 0 if palindrome, -1 if not
 int palindrome(const char* string) {
-
+	int i = 0;
+	char* trimmed = trimstring(string);
+	int len = strlen(trimmed);
+	int j = len - 1;
+	for (i = 0; i < len/2; i++) {
+		if (trimmed[i] != trimmed[j]) 
+			return -1;
+		j--;
+	}
+	return 0;
 }
 
-
-//set up a semaphore operation
-void setsembuf(struct sembuf *s, int n, int op, int flg) {
-	s->sem_num = (short)n;
-	s->sem_op = (short)op;
-	s->sem_flg = (short)flg;
-	return;
+// returns the string with only alphanumeric lowercase characters
+char* trimstring(const char* string) {
+	char* trimmed = (char*)malloc(LINESIZE*sizeof(char));
+	int i, j;
+	char t;
+	j = 0;
+	for (i = 0; i < LINESIZE; i++) {
+		t = string[i];	
+		if (isalpha(t) || isdigit(t) || t == '\0') {
+			if (isupper(t)) {
+				t = tolower(t);	
+			}
+			trimmed[j] = t;
+			if (trimmed[j] == '\0')
+				break;
+			j++;
+		}
+	} 	
+	return trimmed;
 }
+

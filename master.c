@@ -1,8 +1,14 @@
 /*
-$Id: master.c,v 1.4 2017/09/20 01:59:20 o1-hester Exp o1-hester $
-$Date: 2017/09/20 01:59:20 $
-$Revision: 1.4 $
+$Id: master.c,v 1.6 2017/09/22 22:55:49 o1-hester Exp $
+$Date: 2017/09/22 22:55:49 $
+$Revision: 1.6 $
 $Log: master.c,v $
+Revision 1.6  2017/09/22 22:55:49  o1-hester
+cleanup
+
+Revision 1.5  2017/09/20 06:50:10  o1-hester
+child limit
+
 Revision 1.4  2017/09/20 01:59:20  o1-hester
 *** empty log message ***
 
@@ -18,47 +24,32 @@ Initial revision
 $Author: o1-hester $ 
 */
 
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/sem.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/msg.h>
-#include <sys/stat.h>
-#define KEYPATH "./yobanana.boy"
-#define PROJ_ID 456234
-#define SEM_ID 234456
-#define PERM (S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH)
+#include "ipchelper.h"
+#define INFILE "./strings.in"
 
-typedef struct {
-	long mType;
-	char mText[80];
-} mymsg_t;
-
-void setArrayFromFile(char** list, FILE* fp);
+int setArrayFromFile(char** list, FILE* fp);
 int countLines(FILE* fp);
-int removeMsgQueue(int msgid);
-void setsembuf(struct sembuf *s, int n, int op, int flg);
-int initelement(int semid, int semnum, int semval);
 
 int main (int argc, char** argv) {
-	const char* filename = "./strings.in";
-	char** mylist;
-
-	FILE* fp = fopen(filename, "r");
+	// open input file
+	FILE* fp = fopen(INFILE, "r");
 	if (fp == NULL) {
 		fprintf(stderr, "File not found.\n");
-		exit(1);
+		return 1;
 	}
+
 	// initialize mylist from file
-	int lines = countLines(fp);
+	char** mylist;
+	int lines; 
+	if ((lines = countLines(fp)) == -1) {
+		perror("Failed to read from file.");
+		return 1;
+	}
 	mylist = malloc(lines*sizeof(char*));
-	setArrayFromFile(mylist, fp);
+	if (setArrayFromFile(mylist, fp) == -1) {
+		perror("Failed to read from file.");
+		return 1;
+	}
 
 	// get key from file
 	key_t mkey, skey;
@@ -75,14 +66,11 @@ int main (int argc, char** argv) {
 		perror("Failed to create semaphore.");
 		return 1;
 	}	
-	struct sembuf wait[1];
 	struct sembuf waitfordone[1];
-	struct sembuf signal[1];
 	struct sembuf birthcontrol[1];
-	setsembuf(wait, 0, -1, 0);
 	setsembuf(waitfordone, 1, 0, 0);
-	setsembuf(signal, 0, 1, 0);
 	setsembuf(birthcontrol, 2, -1, 0);
+
 	// set up file i/o lock
 	if (initelement(semid, 0, 1) == -1) {
 		perror("Failed to initialize semaphore.");
@@ -108,22 +96,25 @@ int main (int argc, char** argv) {
 	/************** Set up message queue *********/
 	// Initiate message queue	
 	int msgid;
-	mymsg_t* mymsg;
 	if ((msgid = msgget(mkey, PERM | IPC_CREAT)) == -1) {
 		perror("Failed to create message queue.");
-		exit(1);
+		return 1;
 	}
 	
 	// Send mylist to msgqueue
 	int j;
+	mymsg_t* mymsg;
 	for (j = 1; j <= lines; j++) {
 		if ((mymsg = (mymsg_t*) malloc(sizeof(mymsg_t))) == NULL) {
 			perror("Failed to allocate message.");
 			return 1;
 		}
+		// mType is index of string
+		// mText is string
+		// child finds string using mType
 		mymsg->mType = j;
-		strcpy(mymsg->mText, mylist[j-1]);
-		if (msgsnd(msgid, mymsg, 80, 0) == -1) {
+		memcpy(mymsg->mText, mylist[j-1], LINESIZE);
+		if (msgsnd(msgid, mymsg, LINESIZE, 0) == -1) {
 			perror("Failed to send message.");
 			return 1;
 		}	
@@ -132,21 +123,22 @@ int main (int argc, char** argv) {
 	
 	// make child
 	int childpid;
-	char palinid[3];
-	char palinindex[3];
-	int i = 0;
-	while (i < lines) {
-
+	char palinid[16];
+	char palinindex[16];
+	j = 0;
+	while (j < lines) {
+		// if there are 19 processes, wait for one to finish
 		if (semop(semid, birthcontrol, 1) == -1) {
 			perror("Semaphore birth control.");
 			return 1;
 		}
 		if (childpid = fork()) {
-			sprintf(palinid, "%d", i+1 % 20);
-			sprintf(palinindex, "%d", i);
+			// set id and msg index
+			sprintf(palinid, "%d", j+1 % 20);
+			sprintf(palinindex, "%d", j);
 			break;
 		}
-		i++;
+		j++;
 	}
 
 	/***************** Child ******************/
@@ -157,13 +149,16 @@ int main (int argc, char** argv) {
 		// execute palin with id
 		execl("./palin", "palin", palinid, palinindex, NULL);
 		perror("Exec failure.");
-		exit(1); // if error
+		return 1; // if error
 	}
 	/***************** Parent *****************/
 	if (childpid == 0) {
 		
 		// Waits for all children to be done
-		semop(semid, waitfordone, 1);
+		if (semop(semid, waitfordone, 1) == -1) {
+			perror("Failed to wait for children.");
+			return 1;
+		}
 		// Kill message queue
 		fprintf(stderr, "Killing msgqueue.\n");	
 		if (removeMsgQueue(msgid) == -1){
@@ -183,8 +178,7 @@ int main (int argc, char** argv) {
 }
 
 // Set a char** to a list of strings (by line) from a file
-void setArrayFromFile(char** list, FILE* fp) {
-	const size_t LINESIZE = 80;
+int setArrayFromFile(char** list, FILE* fp) {
 	int n = 0;
 	char* line = malloc(LINESIZE*sizeof(char));
 	rewind(fp);
@@ -196,11 +190,13 @@ void setArrayFromFile(char** list, FILE* fp) {
 		n++;
 	}
 	free(line);
+	if (errno != 0)
+		return -1;
+	return 0;
 }
 
 // Count how many lines a file has
 int countLines(FILE* fp) {
-	const size_t LINESIZE = 80;
 	int n = 0;
 	char* line = malloc(LINESIZE*sizeof(char));
 	rewind(fp);
@@ -208,30 +204,8 @@ int countLines(FILE* fp) {
 		n++;
 	}
 	free(line);
+	if (errno != 0)
+		return -1;
 	return n;
-}
-
-// returns -1 on failure
-int initelement(int semid, int semnum, int semval) {
-	union semun {
-		int val;
-		struct semid_ds *buf;
-		unsigned short *array;
-	} arg;
-	arg.val = semval;
-	return semctl(semid, semnum, SETVAL, arg);
-}
-	
-//set up a semaphore operation
-void setsembuf(struct sembuf *s, int n, int op, int flg) {
-	s->sem_num = (short)n;
-	s->sem_op = (short)op;
-	s->sem_flg = (short)flg;
-	return;
-}
-
-// destroy message queue segment
-int removeMsgQueue(int msgid) {
-	return msgctl(msgid, IPC_RMID, NULL);
 }
 

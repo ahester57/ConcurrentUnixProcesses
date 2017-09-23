@@ -1,8 +1,11 @@
 /*
-$Id: ipchelper.c,v 1.1 2017/09/22 22:55:29 o1-hester Exp $
-$Date: 2017/09/22 22:55:29 $
-$Revision: 1.1 $
+$Id: ipchelper.c,v 1.2 2017/09/23 04:43:04 o1-hester Exp $
+$Date: 2017/09/23 04:43:04 $
+$Revision: 1.2 $
 $Log: ipchelper.c,v $
+Revision 1.2  2017/09/23 04:43:04  o1-hester
+*** empty log message ***
+
 Revision 1.1  2017/09/22 22:55:29  o1-hester
 Initial revision
 
@@ -34,4 +37,22 @@ void setsembuf(struct sembuf *s, int n, int op, int flg) {
 // destroy message queue segment
 int removeMsgQueue(int msgid) {
 	return msgctl(msgid, IPC_RMID, NULL);
+}
+
+// Handler for SIGINT
+void catchctrlc(int signo) {
+	char* msg = "Ctrl^C pressed, killing children.\n";
+	write(STDERR_FILENO, msg, sizeof(msg));
+	pid_t pgid = getpgid(getpid());
+	kill(pgid, SIGKILL);
+	execl("/bin/ipcrm", "ipcrm", "--all", NULL);
+}
+
+// Handler for SIGALRM
+void handletimer(int signo) {
+	char* msg = "Alarm occured. Time to kill children.\n";
+	write(STDERR_FILENO, msg, sizeof(msg));
+	pid_t pgid = getpgid(getpid());
+	kill(pgid, SIGKILL);
+	execl("/bin/ipcrm", "ipcrm", "--all", NULL);
 }

@@ -1,8 +1,11 @@
 /*
-$Id: master.c,v 1.6 2017/09/22 22:55:49 o1-hester Exp $
-$Date: 2017/09/22 22:55:49 $
-$Revision: 1.6 $
+$Id: master.c,v 1.7 2017/09/23 04:43:25 o1-hester Exp $
+$Date: 2017/09/23 04:43:25 $
+$Revision: 1.7 $
 $Log: master.c,v $
+Revision 1.7  2017/09/23 04:43:25  o1-hester
+trying to set up signal handlers
+
 Revision 1.6  2017/09/22 22:55:49  o1-hester
 cleanup
 
@@ -29,6 +32,7 @@ $Author: o1-hester $
 
 int setArrayFromFile(char** list, FILE* fp);
 int countLines(FILE* fp);
+int removeshmem(int msgid, int semid);
 
 int main (int argc, char** argv) {
 	// open input file
@@ -50,7 +54,28 @@ int main (int argc, char** argv) {
 		perror("Failed to read from file.");
 		return 1;
 	}
-
+	//alarm(4);
+	/*************** Set up signal handler ********/
+	struct sigaction newact = {0};
+	struct sigaction timer = {0};
+	timer.sa_handler = SIG_IGN;
+	timer.sa_flags = 0;
+	newact.sa_handler = catchctrlc;
+	newact.sa_flags = 0;
+	// set timer handler
+	if ((sigemptyset(&timer.sa_mask) == -1) ||
+	    (sigaction(SIGALRM, &timer, NULL) == -1)) {
+		perror("Failed to set SIGALRM handler.");
+		return 1;
+	}	
+	// set intr handler
+	if ((sigemptyset(&newact.sa_mask) == -1) ||
+	    (sigaction(SIGINT, &newact, NULL) == -1)) {
+		perror("Failed to set SIGINT handler.");
+		return 1;
+	}	
+	fprintf(stderr, "asdf\n");
+	
 	// get key from file
 	key_t mkey, skey;
 	mkey = ftok(KEYPATH, PROJ_ID);
@@ -101,6 +126,7 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 	
+		fprintf(stderr, "just paused");
 	// Send mylist to msgqueue
 	int j;
 	mymsg_t* mymsg;
@@ -121,60 +147,84 @@ int main (int argc, char** argv) {
 	}
 	free(mylist);
 	
+	/****************** Spawn Children ***********/
 	// make child
 	int childpid;
 	char palinid[16];
 	char palinindex[16];
+	char masterid[16];
+
 	j = 0;
+	long master = (long)getpid();
+	sprintf(masterid, "%ld", master);
 	while (j < lines) {
 		// if there are 19 processes, wait for one to finish
 		if (semop(semid, birthcontrol, 1) == -1) {
 			perror("Semaphore birth control.");
 			return 1;
 		}
-		if (childpid = fork()) {
+		if ((childpid = fork())) {
 			// set id and msg index
 			sprintf(palinid, "%d", j+1 % 20);
 			sprintf(palinindex, "%d", j);
 			break;
-		}
+		}  
+		if (2 == 3) {
+			pause();
+			fprintf(stderr, "just paused");
+		}	
+		
 		j++;
 	}
 
-	/***************** Child ******************/
-	if (childpid == -1)
+	fprintf(stderr, "childpid = %d\n", childpid);
+	if (childpid == -1) {
 		perror("Failed to create child.");
-
-	if (childpid > 0) {
-		// execute palin with id
-		execl("./palin", "palin", palinid, palinindex, NULL);
-		perror("Exec failure.");
-		return 1; // if error
+		if (removeshmem(msgid, semid) == -1) {
+			// failed to remove shared mem segment
+			return 1;
+		}
 	}
 	/***************** Parent *****************/
 	if (childpid == 0) {
-		
+		fprintf(stderr, "waiting...");	
 		// Waits for all children to be done
 		if (semop(semid, waitfordone, 1) == -1) {
 			perror("Failed to wait for children.");
 			return 1;
 		}
-		// Kill message queue
-		fprintf(stderr, "Killing msgqueue.\n");	
-		if (removeMsgQueue(msgid) == -1){
-			perror("Failed to destroy message queue.");
+		if (removeshmem(msgid, semid) == -1) {
+			// failed to remove shared mem segment
 			return 1;
 		}
-		// kill semaphore set
-		fprintf(stderr, "Killing semaphore set.\n");
-		if (semctl(semid, 0, IPC_RMID) == -1) {
-			perror("Failed to remove semaphore set.");
-			return 1;
-		}
-		fprintf(stderr, "Done.\n");
+		fprintf(stderr, "Done. %ld\n", (long)getpgid(getpid()));
 	}	
+	/***************** Child ******************/
+	if (childpid > 0) {
+		// execute palin with id
+		execl("./palin", "palin", palinid, palinindex, masterid, NULL);
+		perror("Exec failure.");
+		return 1; // if error
+	}
 	return 0;	
 
+}
+
+// Remove shared memory segments
+int removeshmem(int msgid, int semid) {
+	// Kill message queue
+	fprintf(stderr, "Killing msgqueue.\n");	
+	if (removeMsgQueue(msgid) == -1) {
+		perror("Failed to destroy message queue.");
+	}
+	// kill semaphore set
+	fprintf(stderr, "Killing semaphore set.\n");
+	if (semctl(semid, 0, IPC_RMID) == -1) {
+		perror("Failed to remove semaphore set.");
+	}
+	if (errno != 0)
+		return -1;
+	return 0;
 }
 
 // Set a char** to a list of strings (by line) from a file
@@ -195,7 +245,7 @@ int setArrayFromFile(char** list, FILE* fp) {
 	return 0;
 }
 
-// Count how many lines a file has
+// Count how  many lines a file has
 int countLines(FILE* fp) {
 	int n = 0;
 	char* line = malloc(LINESIZE*sizeof(char));

@@ -1,8 +1,11 @@
 /*
-$Id: palin.c,v 1.6 2017/09/22 22:56:10 o1-hester Exp $
-$Date: 2017/09/22 22:56:10 $ 
-$Revision: 1.6 $
+$Id: palin.c,v 1.7 2017/09/23 04:43:42 o1-hester Exp $
+$Date: 2017/09/23 04:43:42 $ 
+$Revision: 1.7 $
 $Log: palin.c,v $
+Revision 1.7  2017/09/23 04:43:42  o1-hester
+trying to set up signal handlers
+
 Revision 1.6  2017/09/22 22:56:10  o1-hester
 palindrome support
 
@@ -29,16 +32,24 @@ $Author: o1-hester $
 #define PALIN "./palin.out"
 #define NOPALIN "./nopalin.out"
 
+long masterpid;
+
 int writeToFile(const char* filename, long pid, int index, const char* text); 
 int palindrome(const char* string);
 char* trimstring(const char* string);
+void catch(int signo) {
+	kill(masterpid, SIGKILL);
+}
 
 int main (int argc, char** argv) {
 	// check for # of args
-	if (argc < 3) {
+	if (argc < 4) {
 		fprintf(stderr, "Wrong # of args. ");
 		return 1;
 	}
+
+	masterpid = (long)atoi(argv[3]);
+	kill(masterpid, SIGCONT);
 	// random r1 r2
 	int r1, r2;
 	srand(time(NULL));
@@ -53,6 +64,17 @@ int main (int argc, char** argv) {
 	mkey = ftok(KEYPATH, PROJ_ID);		
 	skey = ftok(KEYPATH, SEM_ID);
 	
+
+	/*************** Set up signal handler ********/
+	struct sigaction act = {0};
+	act.sa_handler = catch;
+	act.sa_flags = 0;
+	if ((sigemptyset(&act.sa_mask) == -1) ||
+	    (sigaction(SIGINT, &act, NULL) == -1)) {
+		perror("Failed to set SIGINT handler.");
+		return 1;
+	}	
+
 	/***************** Set up semaphore ************/
 	int semid;
 	if ((semid = semget(skey, 3, PERM)) == -1) {
@@ -87,12 +109,13 @@ int main (int argc, char** argv) {
 		return 1;	
 	}
 	/************ Critical section ***********/
-	//sleep(r1);
+	sleep(r1);
 		
 	long pid = (long)getpid();	
+	long ppid = (long)getppid();
 	const time_t tm = time(NULL);
 	char* tme = ctime(&tm);
-	fprintf(stderr, "palin (%ld) in crit section: %s", pid, tme); 
+	fprintf(stderr, "(ch:=%ld)(par:=%ld in crit sec: %s", pid, ppid, tme); 
 
 	int p = palindrome(mymsg.mText);
 	char* filename;
@@ -102,6 +125,12 @@ int main (int argc, char** argv) {
 
 	if (writeToFile(filename, pid, index, mymsg.mText) == -1) {
 		// failed to open file
+		// unlock file
+		if (semop(semid, mutex+1, 1) == -1)
+			perror("Failed to unlock semid.");
+		// decrement line counter
+		if (semop(semid, signalDad, 2) == -1)
+			perror("Failed to signal parent.");
 		return 1;
 	}	
 
@@ -129,7 +158,7 @@ int writeToFile(const char* filename, long pid, int index, const char* text) {
 	FILE* fp;
 	fp = fopen(filename, "a+");
 	if (fp == NULL) {
-		perror("Failed to open file:");
+		perror("Failed to open file.");
 		return -1;
 	}
 	fprintf((FILE*)fp, "%ld\t%d\t%s\n", pid, index, text);

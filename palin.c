@@ -1,5 +1,5 @@
 /*
-$Id: palin.c,v 1.7 2017/09/23 04:43:42 o1-hester Exp $
+$Id: palin.c,v 1.7 2017/09/23 04:43:42 o1-hester Exp o1-hester $
 $Date: 2017/09/23 04:43:42 $ 
 $Revision: 1.7 $
 $Log: palin.c,v $
@@ -32,27 +32,41 @@ $Author: o1-hester $
 #define PALIN "./palin.out"
 #define NOPALIN "./nopalin.out"
 
-long masterpid;
+//long masterpid;
 
 int writeToFile(const char* filename, long pid, int index, const char* text); 
 int palindrome(const char* string);
 char* trimstring(const char* string);
 void catch(int signo) {
-	kill(masterpid, SIGKILL);
+	//kill(masterpid, SIGKILL);
+	sigset_t maskall, critmask, maskold;
+	sigfillset(&critmask);
+	sigfillset(&maskall);
+	sigdelset(&critmask, SIGCONT);
+	//sigprocmask(SIG_SETMASK, &maskall, &maskold);
+	//sigsuspend(&critmask);	
+	char* msg = "Child interrupted. Goodbye.\n";
+	write(STDERR_FILENO, msg, sizeof(msg));
+	//sigprocmask(SIG_SETMASK, &maskold, NULL);
+	exit(1);
 }
 
 int main (int argc, char** argv) {
 	// check for # of args
-	if (argc < 4) {
+	if (argc < 3) {
 		fprintf(stderr, "Wrong # of args. ");
 		return 1;
 	}
 
-	masterpid = (long)atoi(argv[3]);
-	kill(masterpid, SIGCONT);
+	//masterpid = (long)atoi(argv[3]);
+	//if (kill(masterpid, SIGCONT)) {
+	//	perror("aaa");
+	//}
 	// random r1 r2
 	int r1, r2;
-	srand(time(NULL));
+	struct timespec tm;
+	clock_gettime(CLOCK_MONOTONIC, &tm);
+	srand((unsigned)(tm.tv_sec ^ tm.tv_nsec ^ (tm.tv_nsec >> 31)));
 	r1 = rand() % 3;
 	r2 = rand() % 3;
 	
@@ -70,7 +84,8 @@ int main (int argc, char** argv) {
 	act.sa_handler = catch;
 	act.sa_flags = 0;
 	if ((sigemptyset(&act.sa_mask) == -1) ||
-	    (sigaction(SIGINT, &act, NULL) == -1)) {
+	    (sigaction(SIGINT, &act, NULL) == -1) ||
+	    (sigaction(SIGUSR1, &act, NULL) == -1)) {
 		perror("Failed to set SIGINT handler.");
 		return 1;
 	}	
@@ -113,9 +128,9 @@ int main (int argc, char** argv) {
 		
 	long pid = (long)getpid();	
 	long ppid = (long)getppid();
-	const time_t tm = time(NULL);
-	char* tme = ctime(&tm);
-	fprintf(stderr, "(ch:=%ld)(par:=%ld in crit sec: %s", pid, ppid, tme); 
+	const time_t tma = time(NULL);
+	char* tme = ctime(&tma);
+	fprintf(stderr, "(ch:=%d)in crit sec: %s", index, tme); 
 
 	int p = palindrome(mymsg.mText);
 	char* filename;
@@ -134,8 +149,9 @@ int main (int argc, char** argv) {
 		return 1;
 	}	
 
-	//sleep(r2);
+	sleep(r2);
 	/*********** Exit section **************/
+	raise(SIGCONT);
 	// unlock file
 	if (semop(semid, mutex+1, 1) == -1) { 		
 		perror("Failed to unlock semid.");

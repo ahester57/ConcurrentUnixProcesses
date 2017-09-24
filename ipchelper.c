@@ -1,5 +1,5 @@
 /*
-$Id: ipchelper.c,v 1.2 2017/09/23 04:43:04 o1-hester Exp $
+$Id: ipchelper.c,v 1.2 2017/09/23 04:43:04 o1-hester Exp o1-hester $
 $Date: 2017/09/23 04:43:04 $
 $Revision: 1.2 $
 $Log: ipchelper.c,v $
@@ -44,8 +44,17 @@ void catchctrlc(int signo) {
 	char* msg = "Ctrl^C pressed, killing children.\n";
 	write(STDERR_FILENO, msg, sizeof(msg));
 	pid_t pgid = getpgid(getpid());
-	kill(pgid, SIGKILL);
-	execl("/bin/ipcrm", "ipcrm", "--all", NULL);
+	while(wait(NULL)) {
+		if (errno == ECHILD)
+			break;
+	}
+	kill(pgid, SIGINT);
+	char* env[] = { "SOURCE=MYDATA",
+			"TARGET=OUTPUT",
+			"lines=65",
+			(char*)NULL };
+	//sleep(2);
+	execle("/bin/ipcrm", "ipcrm", "--all", (char*)NULL, env);
 }
 
 // Handler for SIGALRM
@@ -53,6 +62,15 @@ void handletimer(int signo) {
 	char* msg = "Alarm occured. Time to kill children.\n";
 	write(STDERR_FILENO, msg, sizeof(msg));
 	pid_t pgid = getpgid(getpid());
-	kill(pgid, SIGKILL);
-	execl("/bin/ipcrm", "ipcrm", "--all", NULL);
+
+	kill(pgid, SIGINT);
+	while(wait(NULL)) {
+		if (errno == ECHILD)
+			break;
+	}
+	char* env[] = { "SOURCE=MYDATA",
+			"TARGET=OUTPUT",
+			"lines=65",
+			(char*)NULL };
+	execle("/bin/ipcrm", "ipcrm", "--all", (char*)NULL, env);
 }

@@ -1,5 +1,5 @@
 /*
-$Id: master.c,v 1.7 2017/09/23 04:43:25 o1-hester Exp $
+$Id: master.c,v 1.7 2017/09/23 04:43:25 o1-hester Exp o1-hester $
 $Date: 2017/09/23 04:43:25 $
 $Revision: 1.7 $
 $Log: master.c,v $
@@ -54,11 +54,11 @@ int main (int argc, char** argv) {
 		perror("Failed to read from file.");
 		return 1;
 	}
-	//alarm(4);
+	alarm(60);
 	/*************** Set up signal handler ********/
 	struct sigaction newact = {0};
 	struct sigaction timer = {0};
-	timer.sa_handler = SIG_IGN;
+	timer.sa_handler = handletimer;
 	timer.sa_flags = 0;
 	newact.sa_handler = catchctrlc;
 	newact.sa_flags = 0;
@@ -74,7 +74,6 @@ int main (int argc, char** argv) {
 		perror("Failed to set SIGINT handler.");
 		return 1;
 	}	
-	fprintf(stderr, "asdf\n");
 	
 	// get key from file
 	key_t mkey, skey;
@@ -92,9 +91,10 @@ int main (int argc, char** argv) {
 		return 1;
 	}	
 	struct sembuf waitfordone[1];
-	struct sembuf birthcontrol[1];
+	struct sembuf birthcontrol[2];
 	setsembuf(waitfordone, 1, 0, 0);
 	setsembuf(birthcontrol, 2, -1, 0);
+	setsembuf(birthcontrol+1, 2, 1, 0);
 
 	// set up file i/o lock
 	if (initelement(semid, 0, 1) == -1) {
@@ -126,7 +126,6 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 	
-		fprintf(stderr, "just paused");
 	// Send mylist to msgqueue
 	int j;
 	mymsg_t* mymsg;
@@ -152,42 +151,56 @@ int main (int argc, char** argv) {
 	int childpid;
 	char palinid[16];
 	char palinindex[16];
-	char masterid[16];
-
+	int semval;
 	j = 0;
-	long master = (long)getpid();
-	sprintf(masterid, "%ld", master);
 	while (j < lines) {
 		// if there are 19 processes, wait for one to finish
 		if (semop(semid, birthcontrol, 1) == -1) {
 			perror("Semaphore birth control.");
 			return 1;
 		}
-		if ((childpid = fork())) {
+		if ((semval = semctl(semid, 2, GETVAL)) == -1) {
+			perror("Semaphore birth control.");
+			return 1;
+		}
+		// removal of next line may result in loss of terminal use!
+		if (semval < 2) wait(NULL);
+		//sleep(1);
+		if ((childpid = fork()) <= 0) {
 			// set id and msg index
 			sprintf(palinid, "%d", j+1 % 20);
 			sprintf(palinindex, "%d", j);
 			break;
 		}  
-		if (2 == 3) {
-			pause();
-			fprintf(stderr, "just paused");
+		if (3 == 3) {
+			fprintf(stderr, "palin index: %d created.\n", j);
 		}	
-		
-		j++;
+		if (j != -1)	
+			j++;
 	}
 
-	fprintf(stderr, "childpid = %d\n", childpid);
 	if (childpid == -1) {
 		perror("Failed to create child.");
-		if (removeshmem(msgid, semid) == -1) {
+		//if (removeshmem(msgid, semid) == -1) {
 			// failed to remove shared mem segment
+		//	return 1;
+		//}
+		if (semop(semid, birthcontrol+1, 1) == -1) {
+			perror("Semaphore birth control.");
 			return 1;
 		}
 	}
-	/***************** Parent *****************/
+
+	/***************** Child ******************/
 	if (childpid == 0) {
-		fprintf(stderr, "waiting...");	
+		// execute palin with id
+		execl("./palin", "palin", palinid, palinindex, (char*)NULL);
+		perror("Exec failure.");
+		return 1; // if error
+	}
+	/***************** Parent *****************/
+	if (childpid > 0) {
+		fprintf(stderr, "%ld: waiting...", (long)getpid());	
 		// Waits for all children to be done
 		if (semop(semid, waitfordone, 1) == -1) {
 			perror("Failed to wait for children.");
@@ -199,13 +212,6 @@ int main (int argc, char** argv) {
 		}
 		fprintf(stderr, "Done. %ld\n", (long)getpgid(getpid()));
 	}	
-	/***************** Child ******************/
-	if (childpid > 0) {
-		// execute palin with id
-		execl("./palin", "palin", palinid, palinindex, masterid, NULL);
-		perror("Exec failure.");
-		return 1; // if error
-	}
 	return 0;	
 
 }

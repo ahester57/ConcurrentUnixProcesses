@@ -33,21 +33,15 @@ $Author: o1-hester $
 #define NOPALIN "./nopalin.out"
 
 //long masterpid;
+int semid;
+struct sembuf mutex[2];
 
 int writeToFile(const char* filename, long pid, int index, const char* text); 
 int palindrome(const char* string);
 char* trimstring(const char* string);
 void catch(int signo) {
-	//kill(masterpid, SIGKILL);
-	sigset_t maskall, critmask, maskold;
-	sigfillset(&critmask);
-	sigfillset(&maskall);
-	sigdelset(&critmask, SIGCONT);
-	//sigprocmask(SIG_SETMASK, &maskall, &maskold);
-	//sigsuspend(&critmask);	
-	char* msg = "Child interrupted. Goodbye.\n";
-	write(STDERR_FILENO, msg, sizeof(msg));
-	//sigprocmask(SIG_SETMASK, &maskold, NULL);
+	char msg[] = "Child interrupted. Goodbye.\n";
+	write(STDERR_FILENO, msg, 35);
 	exit(1);
 }
 
@@ -57,7 +51,7 @@ int main (int argc, char** argv) {
 		fprintf(stderr, "Wrong # of args. ");
 		return 1;
 	}
-
+		
 	//masterpid = (long)atoi(argv[3]);
 	//if (kill(masterpid, SIGCONT)) {
 	//	perror("aaa");
@@ -78,25 +72,29 @@ int main (int argc, char** argv) {
 	mkey = ftok(KEYPATH, PROJ_ID);		
 	skey = ftok(KEYPATH, SEM_ID);
 	
-
+	// block signals during critical section.
 	/*************** Set up signal handler ********/
 	struct sigaction act = {0};
 	act.sa_handler = catch;
 	act.sa_flags = 0;
 	if ((sigemptyset(&act.sa_mask) == -1) ||
 	    (sigaction(SIGINT, &act, NULL) == -1) ||
-	    (sigaction(SIGUSR1, &act, NULL) == -1)) {
+	    (sigaction(SIGALRM, &act, NULL) == -1)) {
 		perror("Failed to set SIGINT handler.");
 		return 1;
 	}	
 
 	/***************** Set up semaphore ************/
-	int semid;
+	//int semid;
 	if ((semid = semget(skey, 3, PERM)) == -1) {
+		if (errno == EIDRM) {
+			perror("I cannot go on like this :(\n");
+			return 1;
+		}
 		perror("Failed to set up semaphore.");
 		return 1;
 	}
-	struct sembuf mutex[2];
+	//struct sembuf mutex[2];
 	struct sembuf signalDad[2];
 	setsembuf(mutex, 0, -1, 0);
 	setsembuf(mutex+1, 0, 1, 0);
@@ -108,6 +106,10 @@ int main (int argc, char** argv) {
 	size_t size;
 	mymsg_t mymsg;	
 	if ((msgid = msgget(mkey, PERM)) == -1) {
+		if (errno == EIDRM) {
+			perror("I cannot go on like this :(\n");
+			return 1;
+		}
 		perror("Failed to create message queue.");
 		return 1;
 	}
@@ -120,9 +122,18 @@ int main (int argc, char** argv) {
 	/************ Entry section ***************/	
 	// wait until your turn
 	if (semop(semid, mutex, 1) == -1){
+		if (errno == EIDRM) {
+			perror("I cannot go on like this :(\n");
+			return 1;
+		}
 		perror("Failed to lock semid.");
 		return 1;	
 	}
+	sigset_t newmask, oldmask; 	
+	if ((sigfillset(&newmask) == -1) ||
+		(sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
+		perror("Failed setting signal mask.");
+	} 
 	/************ Critical section ***********/
 	sleep(r1);
 		
@@ -151,9 +162,17 @@ int main (int argc, char** argv) {
 
 	sleep(r2);
 	/*********** Exit section **************/
-	raise(SIGCONT);
-	// unlock file
+	if ((sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
+		perror("Failed setting signal mask.");
+	} 
+	// unlock filen
 	if (semop(semid, mutex+1, 1) == -1) { 		
+		if (errno == EINVAL) {
+			char* msg = "Finished critical section after signal\n";
+			fprintf(stderr, "(ch:=%d)in crit sec: %s", index, tme); 
+			fprintf(stderr, msg);
+			return 1;
+		}
 		perror("Failed to unlock semid.");
 		return 1;
 	}

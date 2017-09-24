@@ -1,5 +1,5 @@
 /*
-$Id: ipchelper.h,v 1.2 2017/09/23 04:43:08 o1-hester Exp $
+$Id: ipchelper.h,v 1.2 2017/09/23 04:43:08 o1-hester Exp o1-hester $
 $Date: 2017/09/23 04:43:08 $
 $Revision: 1.2 $
 $Log: ipchelper.h,v $
@@ -40,6 +40,8 @@ typedef struct {
 int initelement(int semid, int semnum, int semval);
 void setsembuf(struct sembuf *s, int n, int op, int flg);
 int removeMsgQueue(int msgid);
+void setmsgid(int msgid);
+int removeshmem(int msgid, int semid);
 void catchctrlc(int signo);
 void handletimer(int signo);
 

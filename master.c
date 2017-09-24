@@ -54,7 +54,7 @@ int main (int argc, char** argv) {
 		perror("Failed to read from file.");
 		return 1;
 	}
-	alarm(60);
+	alarm(15);
 	/*************** Set up signal handler ********/
 	struct sigaction newact = {0};
 	struct sigaction timer = {0};
@@ -125,7 +125,8 @@ int main (int argc, char** argv) {
 		perror("Failed to create message queue.");
 		return 1;
 	}
-	
+	// will need for later
+	setmsgid(msgid);
 	// Send mylist to msgqueue
 	int j;
 	mymsg_t* mymsg;
@@ -181,14 +182,14 @@ int main (int argc, char** argv) {
 
 	if (childpid == -1) {
 		perror("Failed to create child.");
-		//if (removeshmem(msgid, semid) == -1) {
+		if (removeshmem(msgid, semid) == -1) {
 			// failed to remove shared mem segment
-		//	return 1;
-		//}
-		if (semop(semid, birthcontrol+1, 1) == -1) {
-			perror("Semaphore birth control.");
 			return 1;
 		}
+	//	if (semop(semid, birthcontrol+1, 1) == -1) {
+	//		perror("Semaphore birth control.");
+	//		return 1;
+	//	}
 	}
 
 	/***************** Child ******************/
@@ -216,22 +217,6 @@ int main (int argc, char** argv) {
 
 }
 
-// Remove shared memory segments
-int removeshmem(int msgid, int semid) {
-	// Kill message queue
-	fprintf(stderr, "Killing msgqueue.\n");	
-	if (removeMsgQueue(msgid) == -1) {
-		perror("Failed to destroy message queue.");
-	}
-	// kill semaphore set
-	fprintf(stderr, "Killing semaphore set.\n");
-	if (semctl(semid, 0, IPC_RMID) == -1) {
-		perror("Failed to remove semaphore set.");
-	}
-	if (errno != 0)
-		return -1;
-	return 0;
-}
 
 // Set a char** to a list of strings (by line) from a file
 int setArrayFromFile(char** list, FILE* fp) {

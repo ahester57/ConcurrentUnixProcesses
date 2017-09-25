@@ -19,8 +19,10 @@ $Author: o1-hester $
 */
 
 #include "ipchelper.h"
+
 static int sem_id;
 static int msg_id;
+
 // Initializes semaphore with id, num, and value
 // returns -1 on failure
 int initelement(int semid, int semnum, int semval) {
@@ -30,8 +32,17 @@ int initelement(int semid, int semnum, int semval) {
 		unsigned short *array;
 	} arg;
 	arg.val = semval;
-	sem_id = semid;
 	return semctl(semid, semnum, SETVAL, arg);
+}
+
+// creates message queue, returns -1 on error and msgid on success
+int getsemid(key_t skey, int nsems) {
+	int semid;
+	if ((semid = semget(skey, nsems, PERM | IPC_CREAT)) == -1) {
+		return -1;
+	}
+	sem_id = semid;
+	return sem_id;
 }
 
 //set up a semaphore operation
@@ -52,6 +63,26 @@ int getmsgid(key_t mkey) {
 	return msg_id;
 }
 
+// send messages to msgqueue, return -1 on error
+int sendmessages(int msgid, char** mylist, int lines) {
+	int j;
+	mymsg_t* mymsg;
+	for (j = 0; j < lines; j++) {
+		if ((mymsg = (mymsg_t*) malloc(sizeof(mymsg_t))) == NULL) {
+			return -1;
+		}
+		// mType is index of string
+		// mText is string
+		// child finds string using mType
+		mymsg->mType = j+1;	// because mType cannot be 0
+		memcpy(mymsg->mText, mylist[j], LINESIZE);
+		if (msgsnd(msgid, mymsg, LINESIZE, 0) == -1) {
+			return -1;
+		}	
+	}
+	return 0;
+}
+
 // destroy message queue segment
 int removeMsgQueue(int msgid) {
 	return msgctl(msgid, IPC_RMID, NULL);
@@ -67,13 +98,13 @@ int removeshmem(int msgid, int semid) {
 	char* msg = "Killing msgqueue.\n";
 	write(STDERR_FILENO, msg, 18);
 	if (removeMsgQueue(msgid) == -1) {
-		perror("Failed to destroy message queue.");
+		return -1;
 	}
 	// kill semaphore set
 	msg = "Killing semaphore set.\n";
 	write(STDERR_FILENO, msg, 23);
 	if (semctl(semid, 0, IPC_RMID) == -1) {
-		perror("Failed to remove semaphore set.");
+		return -1;
 	}
 	if (errno != 0)
 		return -1;

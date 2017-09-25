@@ -1,5 +1,5 @@
 /*
-$Id: ipchelper.h,v 1.4 2017/09/24 23:33:44 o1-hester Exp $
+$Id: ipchelper.h,v 1.4 2017/09/24 23:33:44 o1-hester Exp o1-hester $
 $Date: 2017/09/24 23:33:44 $
 $Revision: 1.4 $
 $Log: ipchelper.h,v $
@@ -24,6 +24,7 @@ $Author: o1-hester $
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -43,12 +44,12 @@ typedef struct {
 } mymsg_t;
 
 int initelement(int semid, int semnum, int semval);
+int getsemid(key_t skey, int nsems);
 void setsembuf(struct sembuf *s, int n, int op, int flg);
 int getmsgid(key_t mkey);
+int sendmessages(int msgid, char** mylist, int lines);
 int removeMsgQueue(int msgid);
 void setmsgid(int msgid);
 int removeshmem(int msgid, int semid);
-void catchctrlc(int signo);
-void handletimer(int signo);
 
 #endif

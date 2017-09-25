@@ -50,6 +50,7 @@ struct sembuf mutex[2];
 
 int palindrome(const char* string);
 char* trimstring(const char* string);
+int initsighandler();
 
 int main (int argc, char** argv) {
 	// check for # of args
@@ -69,22 +70,20 @@ int main (int argc, char** argv) {
 	// if not number, then id, index = 0, respectively
 	int id = atoi(argv[1]);
 	int index = atoi(argv[2]);
-	// get keys
-	key_t mkey, skey;
-	mkey = ftok(KEYPATH, PROJ_ID);		
-	skey = ftok(KEYPATH, SEM_ID);
 	
-	// block signals during critical section.
-	/*************** Set up signal handler ********/
-	struct sigaction act = {0};
-	act.sa_handler = catchchildintr;
-	act.sa_flags = 0;
-	if ((sigemptyset(&act.sa_mask) == -1) ||
-	    (sigaction(SIGINT, &act, NULL) == -1) ||
-	    (sigaction(SIGALRM, &act, NULL) == -1)) {
-		perror("Failed to set SIGINT handler.");
+	// get key from file
+	key_t mkey, skey;
+	if (((mkey = ftok(KEYPATH, PROJ_ID)) == -1) ||
+		((skey = ftok(KEYPATH, SEM_ID)) == -1)) {
+		perror("Failed to retreive keys.");
 		return 1;
-	}	
+	}
+	
+	/*************** Set up signal handler ********/
+	if (initsighandler() == -1) {
+		perror("Failed to set up signal handlers");
+		return 1;
+	}
 
 	/***************** Set up semaphore ************/
 	//int semid;
@@ -136,15 +135,15 @@ int main (int argc, char** argv) {
 	if ((sigfillset(&newmask) == -1) ||
 		(sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
 		perror("Failed setting signal mask.");
+		return 1;
 	} 
 	/************ Critical section ***********/
 	sleep(r1);
 		
 	long pid = (long)getpid();	
-	long ppid = (long)getppid();
 	const time_t tma = time(NULL);
 	char* tme = ctime(&tma);
-	fprintf(stderr, "(ch:=%d)in crit sec: %s", index, tme); 
+	fprintf(stderr, "(ch:=%d) in crit sec: %s", index, tme); 
 
 	int p = palindrome(mymsg.mText);
 	char* filename;
@@ -169,6 +168,7 @@ int main (int argc, char** argv) {
 	// Unblock signals after critical sections
 	if ((sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
 		perror("Failed setting signal mask.");
+		return 1;
 	} 
 	// unlock file
 	if (semop(semid, mutex+1, 1) == -1) { 		
@@ -186,7 +186,7 @@ int main (int argc, char** argv) {
 		return 1;
 	}
  	if (errno != 0) {
-		perror("palin:");
+		perror("palin uncaught error:");
 		return 1;
 	}
 	return 0;
@@ -214,7 +214,7 @@ char* trimstring(const char* string) {
 	j = 0;
 	for (i = 0; i < LINESIZE; i++) {
 		t = string[i];	
-		if (isalpha(t) || isdigit(t) || t == '\0') {
+		if (isalpha(t) || isdigit(t) || (t == '\0')) {
 			if (isupper(t)) {
 				t = tolower(t);	
 			}
@@ -227,3 +227,15 @@ char* trimstring(const char* string) {
 	return trimmed;
 }
 
+// initialize signal handler, return -1 on error
+int initsighandler() {
+	struct sigaction act = {0};
+	act.sa_handler = catchchildintr;
+	act.sa_flags = 0;
+	if ((sigemptyset(&act.sa_mask) == -1) ||
+	    (sigaction(SIGINT, &act, NULL) == -1) ||
+	    (sigaction(SIGALRM, &act, NULL) == -1)) {
+		return -1;
+	}	
+	return 0;
+}

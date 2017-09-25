@@ -1,5 +1,5 @@
 /*
-$Id: master.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp $
+$Id: master.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp o1-hester $
 $Date: 2017/09/24 23:32:22 $
 $Revision: 1.9 $
 $Log: master.c,v $
@@ -42,6 +42,7 @@ $Author: o1-hester $
 #define INFILE "./strings.in"
 
 int initmylist(const char* filename, int* lines, char*** mylist);
+int initsighandlers();
 int initsemaphores(int semid, int lines);
 
 int main (int argc, char** argv) {
@@ -53,31 +54,20 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 
-	alarm(60);
-	/*************** Set up signal handler ********/
-	struct sigaction newact = {0};
-	struct sigaction timer = {0};
-	timer.sa_handler = handletimer;
-	timer.sa_flags = 0;
-	newact.sa_handler = catchctrlc;
-	newact.sa_flags = 0;
-	// set timer handler
-	if ((sigemptyset(&timer.sa_mask) == -1) ||
-	    (sigaction(SIGALRM, &timer, NULL) == -1)) {
-		perror("Failed to set SIGALRM handler.");
-		return 1;
-	}	
-	// set intr handler
-	if ((sigemptyset(&newact.sa_mask) == -1) ||
-	    (sigaction(SIGINT, &newact, NULL) == -1)) {
-		perror("Failed to set SIGINT handler.");
-		return 1;
-	}	
-	
 	// get key from file
 	key_t mkey, skey;
-	mkey = ftok(KEYPATH, PROJ_ID);
-	skey = ftok(KEYPATH, SEM_ID); 
+	if (((mkey = ftok(KEYPATH, PROJ_ID)) == -1) ||
+		((skey = ftok(KEYPATH, SEM_ID)) == -1)) {
+		perror("Failed to retreive keys.");
+		return 1;
+	}
+
+	alarm(60);
+	/*************** Set up signal handler ********/
+	if (initsighandlers() == -1) {
+		perror("Failed to set up signal handlers.");
+		return 1;
+	}
 
 	/*************** Set up semaphore *************/
 	// semaphore contains 3 sems:
@@ -85,42 +75,19 @@ int main (int argc, char** argv) {
 	// 1 = master knows when done
 	// 2 = for limiting to 19 children at one time
 	int semid;
-	if ((semid = semget(skey, 3, PERM | IPC_CREAT)) == -1) {
+	if ((semid = getsemid(skey, 3)) == -1) {
 		perror("Failed to create semaphore.");
 		return 1;
 	}	
 	struct sembuf waitfordone[1];
-	struct sembuf birthcontrol[2];
+	struct sembuf birthcontrol[1];
 	setsembuf(waitfordone, 1, 0, 0);
 	setsembuf(birthcontrol, 2, -1, 0);
-	setsembuf(birthcontrol+1, 2, 1, 0);
 	if (initsemaphores(semid, lines) == -1) {
 		perror("Failed to init semaphores.");
 		return 1;
 	}
-	/*
-	// set up file i/o lock
-	if (initelement(semid, 0, 1) == -1) {
-		perror("Failed to initialize semaphore.");
-		if (semctl(semid, 0, IPC_RMID) == -1)
-			perror("Failed to remove semaphore.");
-		return 1;
-	}
-	// set up master knowing when done
-	if (initelement(semid, 1, lines) == -1) {
-		perror("Failed to initialize semaphore.");
-		if (semctl(semid, 0, IPC_RMID) == -1)
-			perror("Failed to remove semaphore.");
-		return 1;
-	}
-	// set up child limiter
-	if (initelement(semid, 2, 19) == -1) {
-		perror("Failed to initialize semaphore.");
-		if (semctl(semid, 0, IPC_RMID) == -1)
-			perror("Failed to remove semaphore.");
-		return 1;
-	}
-	*/
+
 	/************** Set up message queue *********/
 	// Initiate message queue	
 	int msgid;
@@ -129,22 +96,9 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 	// Send mylist to msgqueue
-	int j;
-	mymsg_t* mymsg;
-	for (j = 1; j <= lines; j++) {
-		if ((mymsg = (mymsg_t*) malloc(sizeof(mymsg_t))) == NULL) {
-			perror("Failed to allocate message.");
-			return 1;
-		}
-		// mType is index of string
-		// mText is string
-		// child finds string using mType
-		mymsg->mType = j;
-		memcpy(mymsg->mText, mylist[j-1], LINESIZE);
-		if (msgsnd(msgid, mymsg, LINESIZE, 0) == -1) {
-			perror("Failed to send message.");
-			return 1;
-		}	
+	if (sendmessages(msgid, mylist, lines) == -1) {
+		perror("Failed to send messages to queue.");
+		return 1;
 	}
 	free(mylist);
 	
@@ -155,7 +109,7 @@ int main (int argc, char** argv) {
 	char palinid[16];
 	char palinindex[16];
 	int semval;
-	j = 0;
+	int j = 0;
 	while (j < lines) {
 		// if there are 19 processes, wait for one to finish
 		if (semop(semid, birthcontrol, 1) == -1) {
@@ -180,15 +134,12 @@ int main (int argc, char** argv) {
 		if (childpid != -1)	
 			j++;
 	}
-
+	
+	// If master fails at spawning children
 	if (childpid == -1) {
 		perror("Failed to create child.");
-		//if (removeshmem(msgid, semid) == -1) {
-			// failed to remove shared mem segment
-		//	return 1;
-		//}
-		if (semop(semid, birthcontrol+1, 1) == -1) {
-			perror("Semaphore birth control.");
+		if (removeshmem(msgid, semid) == -1) {
+			perror("failed to remove shared mem segment");
 			return 1;
 		}
 	}
@@ -202,7 +153,7 @@ int main (int argc, char** argv) {
 	}
 	/***************** Parent *****************/
 	if (childpid > 0) {
-		fprintf(stderr, "%ld: waiting...", (long)getpid());	
+		fprintf(stderr, "master: done spawning, waiting for done.\n");	
 		// Waits for all children to be done
 		if (semop(semid, waitfordone, 1) == -1) {
 			perror("Failed to wait for children.");
@@ -210,6 +161,7 @@ int main (int argc, char** argv) {
 		}
 		if (removeshmem(msgid, semid) == -1) {
 			// failed to remove shared mem segment
+			perror("Failed to remove shared memory.");
 			return 1;
 		}
 		fprintf(stderr, "Done. %ld\n", (long)getpgid(getpid()));
@@ -228,6 +180,26 @@ int initmylist(const char* filename, int* lines, char*** mylist) {
 		return -1;
 	}
 	return 0;
+}
+
+// initialize signal handlers, return -1 on error
+int initsighandlers() {
+	struct sigaction newact = {0};
+	struct sigaction timer = {0};
+	timer.sa_handler = handletimer;
+	timer.sa_flags = 0;
+	newact.sa_handler = catchctrlc;
+	newact.sa_flags = 0;
+	// set timer handler
+	if ((sigemptyset(&timer.sa_mask) == -1) ||
+	    (sigaction(SIGALRM, &timer, NULL) == -1)) {
+		return -1;
+	}	
+	// set intr handler
+	if ((sigemptyset(&newact.sa_mask) == -1) ||
+	    (sigaction(SIGINT, &newact, NULL) == -1)) {
+		return -1;
+	}	
 }
 
 // initialize semaphores, return -1 on error

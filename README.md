@@ -1,9 +1,9 @@
 ## Concurrent Unix Processes
 
-#### Austin Hester  
+### Austin Hester  
 ##### University of Missouri - St. Louis  
-###### CS4760 - Operating Systems 
-###### Sanjiv Bhatia  
+##### CS4760 - Operating Systems 
+##### Sanjiv Bhatia  
 
 To build and run:  
 ```  
@@ -13,11 +13,13 @@ make
 
 Uses message queues to talk to children.  
 Messages contain:
-	* mType := the index for child to select its assigned message  
-	* mText := the message string itself
+
+	* `mType` := the index for child to select its assigned message  
+	* `mText` := the message string itself
 
 Protects each child's critical section (write to file) with semaphores.  
 Semaphores to control:  
+
 	* Locking file I/O  
 	* Limiting max # of processes   
 	* Parent knowing when to close msg queues and semaphores  

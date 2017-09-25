@@ -1,4 +1,4 @@
-#$Id: Makefile,v 1.3 2017/09/22 22:55:14 o1-hester Exp $
+#$Id: Makefile,v 1.3 2017/09/22 22:55:14 o1-hester Exp o1-hester $
 #$Date: 2017/09/22 22:55:14 $
 #$Revision: 1.3 $
 #$Log: Makefile,v $
@@ -13,8 +13,8 @@
 #
 #$Author: o1-hester $
 
-OBJECTS = ipchelper.o
-HEADERS = ipchelper.h
+OBJECTS = ipchelper.o sighandler.o filehelper.o
+HEADERS = ipchelper.h sighandler.h filehelper.h
 default: all
 
 all: master palin

@@ -1,8 +1,14 @@
 /*
-$Id: ipchelper.c,v 1.2 2017/09/23 04:43:04 o1-hester Exp o1-hester $
-$Date: 2017/09/23 04:43:04 $
-$Revision: 1.2 $
+$Id: ipchelper.c,v 1.4 2017/09/24 23:32:22 o1-hester Exp o1-hester $
+$Date: 2017/09/24 23:32:22 $
+$Revision: 1.4 $
 $Log: ipchelper.c,v $
+Revision 1.4  2017/09/24 23:32:22  o1-hester
+cleanup, modularization
+
+Revision 1.3  2017/09/24 06:37:17  o1-hester
+better
+
 Revision 1.2  2017/09/23 04:43:04  o1-hester
 *** empty log message ***
 
@@ -36,8 +42,14 @@ void setsembuf(struct sembuf *s, int n, int op, int flg) {
 	return;
 }
 
-void setmsgid(int msgid) {
+// creates message queue, returns -1 on error and msgid on success
+int getmsgid(key_t mkey) {
+	int msgid;
+	if ((msgid = msgget(mkey, PERM | IPC_CREAT)) == -1) {
+		return -1;
+	}
 	msg_id = msgid;
+	return msg_id;
 }
 
 // destroy message queue segment
@@ -47,48 +59,24 @@ int removeMsgQueue(int msgid) {
 
 // Remove shared memory segments
 int removeshmem(int msgid, int semid) {
+	if (msgid == -1)
+		msgid = msg_id;
+	if (semid == -1)
+		semid = sem_id;
 	// Kill message queue
-	fprintf(stderr, "Killing msgqueue.\n");	
+	char* msg = "Killing msgqueue.\n";
+	write(STDERR_FILENO, msg, 18);
 	if (removeMsgQueue(msgid) == -1) {
 		perror("Failed to destroy message queue.");
 	}
 	// kill semaphore set
-	fprintf(stderr, "Killing semaphore set.\n");
+	msg = "Killing semaphore set.\n";
+	write(STDERR_FILENO, msg, 23);
 	if (semctl(semid, 0, IPC_RMID) == -1) {
 		perror("Failed to remove semaphore set.");
 	}
 	if (errno != 0)
 		return -1;
 	return 0;
-}
-
-/************************ Signal Handler ********************/
-// Handler for SIGINT
-void catchctrlc(int signo) {
-	char* msg = "Ctrl^C pressed, killing children.\n";
-	write(STDERR_FILENO, msg, 36);
-	removeshmem(msg_id, sem_id);
-
-	pid_t pgid = getpgid(getpid());
-	while(wait(NULL)) {
-		if (errno == ECHILD)
-			break;
-	}
-
-	kill(pgid, SIGTERM);
-	//sleep(2);
-}
-
-// Handler for SIGALRM
-void handletimer(int signo) {
-	char* msg = "Alarm occured. Time to kill children.\n";
-	write(STDERR_FILENO, msg, 39);
-	pid_t pgid = getpgid(getpid());
-
-	kill(pgid, SIGINT);
-	while(wait(NULL)) {
-		if (errno == ECHILD)
-			break;
-	}
 }
 

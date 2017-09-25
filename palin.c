@@ -1,8 +1,14 @@
 /*
-$Id: palin.c,v 1.7 2017/09/23 04:43:42 o1-hester Exp o1-hester $
-$Date: 2017/09/23 04:43:42 $ 
-$Revision: 1.7 $
+$Id: palin.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp o1-hester $
+$Date: 2017/09/24 23:32:22 $ 
+$Revision: 1.9 $
 $Log: palin.c,v $
+Revision 1.9  2017/09/24 23:32:22  o1-hester
+cleanup, modularization
+
+Revision 1.8  2017/09/24 06:37:53  o1-hester
+signals better.
+
 Revision 1.7  2017/09/23 04:43:42  o1-hester
 trying to set up signal handlers
 
@@ -27,8 +33,14 @@ Initial revision
 $Author: o1-hester $
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 #include <time.h>
 #include "ipchelper.h"
+#include "sighandler.h"
+#include "filehelper.h"
 #define PALIN "./palin.out"
 #define NOPALIN "./nopalin.out"
 
@@ -36,14 +48,8 @@ $Author: o1-hester $
 int semid;
 struct sembuf mutex[2];
 
-int writeToFile(const char* filename, long pid, int index, const char* text); 
 int palindrome(const char* string);
 char* trimstring(const char* string);
-void catch(int signo) {
-	char msg[] = "Child interrupted. Goodbye.\n";
-	write(STDERR_FILENO, msg, 35);
-	exit(1);
-}
 
 int main (int argc, char** argv) {
 	// check for # of args
@@ -52,10 +58,6 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 		
-	//masterpid = (long)atoi(argv[3]);
-	//if (kill(masterpid, SIGCONT)) {
-	//	perror("aaa");
-	//}
 	// random r1 r2
 	int r1, r2;
 	struct timespec tm;
@@ -75,7 +77,7 @@ int main (int argc, char** argv) {
 	// block signals during critical section.
 	/*************** Set up signal handler ********/
 	struct sigaction act = {0};
-	act.sa_handler = catch;
+	act.sa_handler = catchchildintr;
 	act.sa_flags = 0;
 	if ((sigemptyset(&act.sa_mask) == -1) ||
 	    (sigaction(SIGINT, &act, NULL) == -1) ||
@@ -123,12 +125,13 @@ int main (int argc, char** argv) {
 	// wait until your turn
 	if (semop(semid, mutex, 1) == -1){
 		if (errno == EIDRM) {
-			perror("I cannot go on like this :(\n");
+			fprintf(stderr, "(ch:=%d) interrupted.\n", index);
 			return 1;
 		}
 		perror("Failed to lock semid.");
 		return 1;	
 	}
+	// Block all signals during critical section
 	sigset_t newmask, oldmask; 	
 	if ((sigfillset(&newmask) == -1) ||
 		(sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
@@ -151,6 +154,7 @@ int main (int argc, char** argv) {
 
 	if (writeToFile(filename, pid, index, mymsg.mText) == -1) {
 		// failed to open file
+		perror("Failed to open file.");
 		// unlock file
 		if (semop(semid, mutex+1, 1) == -1)
 			perror("Failed to unlock semid.");
@@ -162,15 +166,15 @@ int main (int argc, char** argv) {
 
 	sleep(r2);
 	/*********** Exit section **************/
+	// Unblock signals after critical sections
 	if ((sigprocmask(SIG_BLOCK, &newmask, &oldmask) == -1)) {
 		perror("Failed setting signal mask.");
 	} 
-	// unlock filen
+	// unlock file
 	if (semop(semid, mutex+1, 1) == -1) { 		
 		if (errno == EINVAL) {
-			char* msg = "Finished critical section after signal\n";
-			fprintf(stderr, "(ch:=%d)in crit sec: %s", index, tme); 
-			fprintf(stderr, msg);
+			char* msg = "finished critical section after signal";
+			fprintf(stderr, "(ch:=%d) %s\n", index, msg);
 			return 1;
 		}
 		perror("Failed to unlock semid.");
@@ -185,19 +189,6 @@ int main (int argc, char** argv) {
 		perror("palin:");
 		return 1;
 	}
-	return 0;
-}
-
-// writes to file, returns -1 on error, 0 otherwise
-int writeToFile(const char* filename, long pid, int index, const char* text) {
-	FILE* fp;
-	fp = fopen(filename, "a+");
-	if (fp == NULL) {
-		perror("Failed to open file.");
-		return -1;
-	}
-	fprintf((FILE*)fp, "%ld\t%d\t%s\n", pid, index, text);
-	fclose(fp);
 	return 0;
 }
 

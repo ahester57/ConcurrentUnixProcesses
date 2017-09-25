@@ -1,8 +1,14 @@
 /*
-$Id: master.c,v 1.7 2017/09/23 04:43:25 o1-hester Exp o1-hester $
-$Date: 2017/09/23 04:43:25 $
-$Revision: 1.7 $
+$Id: master.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp $
+$Date: 2017/09/24 23:32:22 $
+$Revision: 1.9 $
 $Log: master.c,v $
+Revision 1.9  2017/09/24 23:32:22  o1-hester
+cleanup, modularization
+
+Revision 1.8  2017/09/24 06:37:33  o1-hester
+signals better
+
 Revision 1.7  2017/09/23 04:43:25  o1-hester
 trying to set up signal handlers
 
@@ -27,34 +33,27 @@ Initial revision
 $Author: o1-hester $ 
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "ipchelper.h"
+#include "sighandler.h"
+#include "filehelper.h"
 #define INFILE "./strings.in"
 
-int setArrayFromFile(char** list, FILE* fp);
-int countLines(FILE* fp);
-int removeshmem(int msgid, int semid);
+int initmylist(const char* filename, int* lines, char*** mylist);
+int initsemaphores(int semid, int lines);
 
 int main (int argc, char** argv) {
-	// open input file
-	FILE* fp = fopen(INFILE, "r");
-	if (fp == NULL) {
-		fprintf(stderr, "File not found.\n");
-		return 1;
-	}
-
 	// initialize mylist from file
 	char** mylist;
 	int lines; 
-	if ((lines = countLines(fp)) == -1) {
+	if (initmylist(INFILE, &lines, &mylist) == -1) {
 		perror("Failed to read from file.");
 		return 1;
 	}
-	mylist = malloc(lines*sizeof(char*));
-	if (setArrayFromFile(mylist, fp) == -1) {
-		perror("Failed to read from file.");
-		return 1;
-	}
-	alarm(15);
+
+	alarm(60);
 	/*************** Set up signal handler ********/
 	struct sigaction newact = {0};
 	struct sigaction timer = {0};
@@ -95,7 +94,11 @@ int main (int argc, char** argv) {
 	setsembuf(waitfordone, 1, 0, 0);
 	setsembuf(birthcontrol, 2, -1, 0);
 	setsembuf(birthcontrol+1, 2, 1, 0);
-
+	if (initsemaphores(semid, lines) == -1) {
+		perror("Failed to init semaphores.");
+		return 1;
+	}
+	/*
 	// set up file i/o lock
 	if (initelement(semid, 0, 1) == -1) {
 		perror("Failed to initialize semaphore.");
@@ -117,16 +120,14 @@ int main (int argc, char** argv) {
 			perror("Failed to remove semaphore.");
 		return 1;
 	}
-
+	*/
 	/************** Set up message queue *********/
 	// Initiate message queue	
 	int msgid;
-	if ((msgid = msgget(mkey, PERM | IPC_CREAT)) == -1) {
+	if ((msgid = getmsgid(mkey)) == -1) {
 		perror("Failed to create message queue.");
 		return 1;
 	}
-	// will need for later
-	setmsgid(msgid);
 	// Send mylist to msgqueue
 	int j;
 	mymsg_t* mymsg;
@@ -149,6 +150,7 @@ int main (int argc, char** argv) {
 	
 	/****************** Spawn Children ***********/
 	// make child
+	// char[]'s for sending id and index to child process
 	int childpid;
 	char palinid[16];
 	char palinindex[16];
@@ -164,32 +166,31 @@ int main (int argc, char** argv) {
 			perror("Semaphore birth control.");
 			return 1;
 		}
+		/************** Important ************/
 		// removal of next line may result in loss of terminal use!
 		if (semval < 2) wait(NULL);
-		//sleep(1);
+		
 		if ((childpid = fork()) <= 0) {
 			// set id and msg index
 			sprintf(palinid, "%d", j+1 % 20);
 			sprintf(palinindex, "%d", j);
 			break;
 		}  
-		if (3 == 3) {
-			fprintf(stderr, "palin index: %d created.\n", j);
-		}	
-		if (j != -1)	
+		fprintf(stderr, "... child  w/ index: %d spawned.\n", j);
+		if (childpid != -1)	
 			j++;
 	}
 
 	if (childpid == -1) {
 		perror("Failed to create child.");
-		if (removeshmem(msgid, semid) == -1) {
+		//if (removeshmem(msgid, semid) == -1) {
 			// failed to remove shared mem segment
+		//	return 1;
+		//}
+		if (semop(semid, birthcontrol+1, 1) == -1) {
+			perror("Semaphore birth control.");
 			return 1;
 		}
-	//	if (semop(semid, birthcontrol+1, 1) == -1) {
-	//		perror("Semaphore birth control.");
-	//		return 1;
-	//	}
 	}
 
 	/***************** Child ******************/
@@ -217,36 +218,36 @@ int main (int argc, char** argv) {
 
 }
 
-
-// Set a char** to a list of strings (by line) from a file
-int setArrayFromFile(char** list, FILE* fp) {
-	int n = 0;
-	char* line = malloc(LINESIZE*sizeof(char));
-	rewind(fp);
-	while (fgets(line, LINESIZE, (FILE*)fp)) {
-		list[n] = malloc(LINESIZE*sizeof(char));
-		// copy line into array, remove newline
-		memcpy(list[n], line, LINESIZE);
-		list[n][strcspn(list[n], "\n")] = '\0';
-		n++;
-	}
-	free(line);
-	if (errno != 0)
+// initialize mylist from file, return -1 on error
+int initmylist(const char* filename, int* lines, char*** mylist) {
+	if ((*lines = countLines(filename)) == -1) {
 		return -1;
+	}
+	*mylist = malloc((*lines)*sizeof(char*));
+	if (setArrayFromFile(filename, *mylist) == -1) {
+		return -1;
+	}
 	return 0;
 }
 
-// Count how  many lines a file has
-int countLines(FILE* fp) {
-	int n = 0;
-	char* line = malloc(LINESIZE*sizeof(char));
-	rewind(fp);
-	while (fgets(line, LINESIZE, (FILE*)fp)) {
-		n++;
-	}
-	free(line);
-	if (errno != 0)
+// initialize semaphores, return -1 on error
+int initsemaphores(int semid, int lines) {
+	// set up file i/o lock
+	if (initelement(semid, 0, 1) == -1) {
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			return -1;
 		return -1;
-	return n;
+	}
+	// set up master knowing when done
+	if (initelement(semid, 1, lines) == -1) {
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			return -1;
+		return -1;
+	}
+	// set up child limiter
+	if (initelement(semid, 2, 19) == -1) {
+		if (semctl(semid, 0, IPC_RMID) == -1)
+			return -1;
+		return -1;
+	}
 }
-

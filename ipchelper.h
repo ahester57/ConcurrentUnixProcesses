@@ -1,8 +1,14 @@
 /*
-$Id: ipchelper.h,v 1.2 2017/09/23 04:43:08 o1-hester Exp o1-hester $
-$Date: 2017/09/23 04:43:08 $
-$Revision: 1.2 $
+$Id: ipchelper.h,v 1.4 2017/09/24 23:33:44 o1-hester Exp $
+$Date: 2017/09/24 23:33:44 $
+$Revision: 1.4 $
 $Log: ipchelper.h,v $
+Revision 1.4  2017/09/24 23:33:44  o1-hester
+cleanup, modularization
+
+Revision 1.3  2017/09/24 06:37:14  o1-hester
+*** empty log message ***
+
 Revision 1.2  2017/09/23 04:43:08  o1-hester
 *** empty log message ***
 
@@ -20,7 +26,6 @@ $Author: o1-hester $
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
@@ -39,6 +44,7 @@ typedef struct {
 
 int initelement(int semid, int semnum, int semval);
 void setsembuf(struct sembuf *s, int n, int op, int flg);
+int getmsgid(key_t mkey);
 int removeMsgQueue(int msgid);
 void setmsgid(int msgid);
 int removeshmem(int msgid, int semid);

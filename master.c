@@ -1,8 +1,17 @@
 /*
-$Id: master.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp o1-hester $
-$Date: 2017/09/24 23:32:22 $
-$Revision: 1.9 $
+$Id: master.c,v 1.12 2017/09/27 20:32:01 o1-hester Exp $
+$Date: 2017/09/27 20:32:01 $
+$Revision: 1.12 $
 $Log: master.c,v $
+Revision 1.12  2017/09/27 20:32:01  o1-hester
+alarm
+
+Revision 1.11  2017/09/25 21:37:15  o1-hester
+*** empty log message ***
+
+Revision 1.10  2017/09/25 06:35:46  o1-hester
+*** empty log message ***
+
 Revision 1.9  2017/09/24 23:32:22  o1-hester
 cleanup, modularization
 
@@ -61,14 +70,13 @@ int main (int argc, char** argv) {
 		perror("Failed to retreive keys.");
 		return 1;
 	}
-
+	// add cmd line argument for timer
 	alarm(60);
 	/*************** Set up signal handler ********/
 	if (initsighandlers() == -1) {
 		perror("Failed to set up signal handlers.");
 		return 1;
 	}
-
 	/*************** Set up semaphore *************/
 	// semaphore contains 3 sems:
 	// 0 = file i/o lock
@@ -87,7 +95,6 @@ int main (int argc, char** argv) {
 		perror("Failed to init semaphores.");
 		return 1;
 	}
-
 	/************** Set up message queue *********/
 	// Initiate message queue	
 	int msgid;
@@ -101,7 +108,6 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 	free(mylist);
-	
 	/****************** Spawn Children ***********/
 	// make child
 	// char[]'s for sending id and index to child process
@@ -121,9 +127,7 @@ int main (int argc, char** argv) {
 			return 1;
 		}
 		/************** Important ************/
-		// removal of next line may result in loss of terminal use!
 		if (semval < 2) wait(NULL);
-		
 		if ((childpid = fork()) <= 0) {
 			// set id and msg index
 			sprintf(palinid, "%d", j+1 % 20);
@@ -134,7 +138,6 @@ int main (int argc, char** argv) {
 		if (childpid != -1)	
 			j++;
 	}
-	
 	// If master fails at spawning children
 	if (childpid == -1) {
 		perror("Failed to create child.");
@@ -143,7 +146,6 @@ int main (int argc, char** argv) {
 			return 1;
 		}
 	}
-
 	/***************** Child ******************/
 	if (childpid == 0) {
 		// execute palin with id
@@ -200,6 +202,7 @@ int initsighandlers() {
 	    (sigaction(SIGINT, &newact, NULL) == -1)) {
 		return -1;
 	}	
+	return 0;
 }
 
 // initialize semaphores, return -1 on error
@@ -222,4 +225,5 @@ int initsemaphores(int semid, int lines) {
 			return -1;
 		return -1;
 	}
+	return 0;
 }

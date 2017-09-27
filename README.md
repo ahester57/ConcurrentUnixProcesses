@@ -14,8 +14,8 @@ make
 Uses message queues to talk to children.  
 Messages contain:
 
-	* `mType` := the index for child to select its assigned message  
-	* `mText` := the message string itself
+	* mType := the index for child to select its assigned message  
+	* mText := the message string itself
 
 Protects each child's critical section (write to file) with semaphores.  
 Semaphores to control:  

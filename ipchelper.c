@@ -1,8 +1,11 @@
 /*
-$Id: ipchelper.c,v 1.4 2017/09/24 23:32:22 o1-hester Exp o1-hester $
-$Date: 2017/09/24 23:32:22 $
-$Revision: 1.4 $
+$Id: ipchelper.c,v 1.5 2017/09/25 06:35:46 o1-hester Exp $
+$Date: 2017/09/25 06:35:46 $
+$Revision: 1.5 $
 $Log: ipchelper.c,v $
+Revision 1.5  2017/09/25 06:35:46  o1-hester
+*** empty log message ***
+
 Revision 1.4  2017/09/24 23:32:22  o1-hester
 cleanup, modularization
 

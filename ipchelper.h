@@ -32,7 +32,7 @@ $Author: o1-hester $
 #include <sys/msg.h>
 #include <sys/stat.h>
 #define PERM (S_IRUSR | S_IWUSR)
-#define KEYPATH "./yobanana.boy"
+#define KEYPATH "./strings.in"
 #define PROJ_ID 456234
 #define SEM_ID 234456
 #define LINESIZE 256

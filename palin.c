@@ -1,8 +1,11 @@
 /*
-$Id: palin.c,v 1.9 2017/09/24 23:32:22 o1-hester Exp o1-hester $
-$Date: 2017/09/24 23:32:22 $ 
-$Revision: 1.9 $
+$Id: palin.c,v 1.10 2017/09/25 06:35:46 o1-hester Exp $
+$Date: 2017/09/25 06:35:46 $ 
+$Revision: 1.10 $
 $Log: palin.c,v $
+Revision 1.10  2017/09/25 06:35:46  o1-hester
+*** empty log message ***
+
 Revision 1.9  2017/09/24 23:32:22  o1-hester
 cleanup, modularization
 
@@ -58,18 +61,16 @@ int main (int argc, char** argv) {
 		fprintf(stderr, "Wrong # of args. ");
 		return 1;
 	}
-		
-	// random r1 r2
+	// if not number, then id, index = 0, respectively
+	int id = atoi(argv[1]);
+	int index = atoi(argv[2]);
+	// random r1 r2 for sleep 
 	int r1, r2;
 	struct timespec tm;
 	clock_gettime(CLOCK_MONOTONIC, &tm);
 	srand((unsigned)(tm.tv_sec ^ tm.tv_nsec ^ (tm.tv_nsec >> 31)));
 	r1 = rand() % 3;
 	r2 = rand() % 3;
-	
-	// if not number, then id, index = 0, respectively
-	int id = atoi(argv[1]);
-	int index = atoi(argv[2]);
 	
 	// get key from file
 	key_t mkey, skey;
@@ -78,13 +79,11 @@ int main (int argc, char** argv) {
 		perror("Failed to retreive keys.");
 		return 1;
 	}
-	
 	/*************** Set up signal handler ********/
 	if (initsighandler() == -1) {
 		perror("Failed to set up signal handlers");
 		return 1;
 	}
-
 	/***************** Set up semaphore ************/
 	//int semid;
 	if ((semid = semget(skey, 3, PERM)) == -1) {
@@ -101,7 +100,6 @@ int main (int argc, char** argv) {
 	setsembuf(mutex+1, 0, 1, 0);
 	setsembuf(signalDad, 1, -1, 0);
 	setsembuf(signalDad+1, 2, 1, 0);
-	
 	/**************** Set up message queue *********/
 	int msgid;
 	size_t size;
@@ -119,7 +117,6 @@ int main (int argc, char** argv) {
 		perror("Failed to recieve message.");
 		return 1;
 	}
-
 	/************ Entry section ***************/	
 	// wait until your turn
 	if (semop(semid, mutex, 1) == -1){
@@ -138,19 +135,16 @@ int main (int argc, char** argv) {
 		return 1;
 	} 
 	/************ Critical section ***********/
-	sleep(r1);
-		
 	long pid = (long)getpid();	
 	const time_t tma = time(NULL);
 	char* tme = ctime(&tma);
 	fprintf(stderr, "(ch:=%d) in crit sec: %s", index, tme); 
-
+	sleep(r1);
 	int p = palindrome(mymsg.mText);
 	char* filename;
-
 	if (p < 0) { filename = NOPALIN; }
 	else { filename = PALIN; }
-
+	// begin writing to file
 	if (writeToFile(filename, pid, index, mymsg.mText) == -1) {
 		// failed to open file
 		perror("Failed to open file.");
@@ -162,7 +156,6 @@ int main (int argc, char** argv) {
 			perror("Failed to signal parent.");
 		return 1;
 	}	
-
 	sleep(r2);
 	/*********** Exit section **************/
 	// Unblock signals after critical sections
@@ -192,7 +185,7 @@ int main (int argc, char** argv) {
 	return 0;
 }
 
-// returns 0 if palindrome, -1 if not
+// returns 1 if palindrome, -1 if not
 int palindrome(const char* string) {
 	int i = 0;
 	char* trimmed = trimstring(string);
@@ -203,7 +196,7 @@ int palindrome(const char* string) {
 			return -1;
 		j--;
 	}
-	return 0;
+	return 1;
 }
 
 // returns the string with only alphanumeric lowercase characters
